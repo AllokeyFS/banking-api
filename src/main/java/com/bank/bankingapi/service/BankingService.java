@@ -8,6 +8,10 @@ import com.bank.bankingapi.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.bank.bankingapi.exception.BankingException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -67,7 +71,7 @@ public class BankingService {
         Account source = findByNumber(request.getSourceAccountNumber());
 
         if (source.getBalance().compareTo(request.getAmount()) < 0) {
-            throw new RuntimeException("Insufficient funds");
+            throw BankingException.insufficientFunds(source.getAccountNumber());
         }
 
         source.setBalance(source.getBalance().subtract(request.getAmount()));
@@ -87,7 +91,7 @@ public class BankingService {
         Account target = findByNumber(request.getTargetAccountNumber());
 
         if (source.getBalance().compareTo(request.getAmount()) < 0) {
-            throw new RuntimeException("Insufficient funds");
+            throw BankingException.insufficientFunds(source.getAccountNumber());
         }
 
         source.setBalance(source.getBalance().subtract(request.getAmount()));
@@ -104,21 +108,32 @@ public class BankingService {
         return mapToTransactionResponse(transactionRepository.save(tx));
     }
 
-    public List<TransactionResponse> getHistory(String accountNumber) {
+    public PageResponse<TransactionResponse> getHistory(String accountNumber, int page, int size) {
         Account account = findByNumber(accountNumber);
-        return transactionRepository
-                .findBySourceAccountOrTargetAccountOrderByCreatedAtDesc(account, account)
+
+        Pageable pageable = PageRequest.of(page, size);
+        Page<Transaction> transactions = transactionRepository
+                .findBySourceAccountOrTargetAccountOrderByCreatedAtDesc(
+                        account, account, pageable);
+
+        PageResponse<TransactionResponse> response = new PageResponse<>();
+        response.setContent(transactions.getContent()
                 .stream()
                 .map(this::mapToTransactionResponse)
-                .collect(Collectors.toList());
+                .collect(Collectors.toList()));
+        response.setPage(transactions.getNumber());
+        response.setSize(transactions.getSize());
+        response.setTotalElements(transactions.getTotalElements());
+        response.setTotalPages(transactions.getTotalPages());
+        response.setLast(transactions.isLast());
+        return response;
     }
 
     // ── HELPERS ───────────────────────────────────────────
 
     private Account findByNumber(String accountNumber) {
         return accountRepository.findByAccountNumber(accountNumber)
-                .orElseThrow(() -> new RuntimeException(
-                        "Account not found: " + accountNumber));
+                .orElseThrow(() -> BankingException.accountNotFound(accountNumber));
     }
 
     private String generateAccountNumber() {
